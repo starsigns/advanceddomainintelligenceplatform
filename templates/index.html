@@ -1,0 +1,435 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Advanced Domain Intelligence Platform - Powered by ViewDNS</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <style>
+        .hero-section {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 4rem 0;
+        }
+        .feature-card {
+            border: none;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+            transition: transform 0.2s;
+        }
+        .feature-card:hover {
+            transform: translateY(-5px);
+        }
+        .stats-card {
+            background: linear-gradient(45deg, #f093fb 0%, #f5576c 100%);
+            color: white;
+        }
+        .api-badge {
+            font-size: 0.75rem;
+            padding: 0.25rem 0.5rem;
+        }
+        .harvest-form {
+            background: #f8f9fa;
+            border-radius: 10px;
+            padding: 2rem;
+        }
+        .progress-section {
+            background: #e9ecef;
+            border-radius: 10px;
+            padding: 1.5rem;
+            margin-top: 2rem;
+        }
+    </style>
+</head>
+<body>
+    <!-- Hero Section -->
+    <div class="hero-section">
+        <div class="container">
+            <div class="row align-items-center">
+                <div class="col-lg-8">
+                    <h1 class="display-4 fw-bold">
+                        <i class="fas fa-globe-americas me-3"></i>
+                        Advanced Domain Intelligence Platform
+                    </h1>
+                    <p class="lead mb-4">
+                        🚀 Powered by ViewDNS API - Harvest MILLIONS of domains with unlimited auto-scroll technology
+                    </p>
+                    <div class="d-flex gap-3">
+                        <span class="badge bg-success fs-6">
+                            <i class="fas fa-check-circle me-1"></i>ViewDNS API Active
+                        </span>
+                        <span class="badge bg-info fs-6">
+                            <i class="fas fa-infinity me-1"></i>Unlimited Domains
+                        </span>
+                        <span class="badge bg-warning fs-6">
+                            <i class="fas fa-zap me-1"></i>Auto-Scroll Harvesting
+                        </span>
+                    </div>
+                </div>
+                <div class="col-lg-4 text-center">
+                    <div class="stats-card card p-4">
+                        <h3><i class="fas fa-database me-2"></i>Database Stats</h3>
+                        <div class="row text-center mt-3">
+                            <div class="col-6">
+                                <h4>{{ "{:,}".format(stats.total_records) }}</h4>
+                                <small>Total Records</small>
+                            </div>
+                            <div class="col-6">
+                                <h4>{{ "{:,}".format(stats.unique_domains) }}</h4>
+                                <small>Unique Domains</small>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Main Content -->
+    <div class="container my-5">
+        <!-- Flash Messages -->
+        {% with messages = get_flashed_messages(with_categories=true) %}
+            {% if messages %}
+                {% for category, message in messages %}
+                    <div class="alert alert-{{ 'danger' if category == 'error' else category }} alert-dismissible fade show" role="alert">
+                        <i class="fas fa-{{ 'exclamation-triangle' if category == 'error' else 'info-circle' if category == 'info' else 'check-circle' if category == 'success' else 'exclamation-triangle' }} me-2"></i>
+                        {{ message }}
+                        <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+                    </div>
+                {% endfor %}
+            {% endif %}
+        {% endwith %}
+
+        <!-- Domain Harvesting Section -->
+        <div class="row">
+            <div class="col-lg-8">
+                <div class="harvest-form">
+                    <h2 class="mb-4">
+                        <i class="fas fa-seedling me-2 text-success"></i>
+                        Start Domain Harvesting
+                    </h2>
+                    
+                    <form method="POST" action="/harvest">
+                        <div class="row">
+                            <div class="col-md-6 mb-3">
+                                <label for="record_type" class="form-label">
+                                    <i class="fas fa-list-alt me-1"></i>Record Type
+                                </label>
+                                <select class="form-select" id="record_type" name="record_type" required>
+                                    <option value="mx">📧 MX (Mail Exchange)</option>
+                                    <option value="ns">🌐 NS (Name Server)</option>
+                                </select>
+                            </div>
+                            
+                            <div class="col-md-6 mb-3">
+                                <label for="server" class="form-label">
+                                    <i class="fas fa-server me-1"></i>Server Name
+                                </label>
+                                <input type="text" class="form-control" id="server" name="server" 
+                                       placeholder="e.g., mx01.ionos.de, mail.google.com" required>
+                                <div class="form-text">
+                                    💡 <strong>mx01.ionos.de</strong> has 3.5M+ domains available!
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <div class="row">
+                            <div class="col-md-6 mb-3">
+                                <label for="api_provider" class="form-label">
+                                    <i class="fas fa-cloud me-1"></i>API Provider
+                                </label>
+                                <select class="form-select" id="api_provider" name="api_provider">
+                                    <option value="viewdns" {{ 'selected' if default_provider == 'viewdns' else '' }}>
+                                        🚀 ViewDNS (UNLIMITED)
+                                    </option>
+                                    <option value="securitytrails" {{ 'selected' if default_provider == 'securitytrails' else '' }}>
+                                        🔒 SecurityTrails (Limited)
+                                    </option>
+                                </select>
+                            </div>
+                            
+                            <div class="col-md-6 mb-3">
+                                <label for="max_pages" class="form-label">
+                                    <i class="fas fa-stop-circle me-1"></i>Max Pages (Optional)
+                                </label>
+                                <input type="number" class="form-control" id="max_pages" name="max_pages" 
+                                       placeholder="Leave empty for unlimited">
+                                <div class="form-text">
+                                    ∞ Leave empty to harvest ALL available domains
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <div class="d-grid">
+                            <button type="submit" class="btn btn-success btn-lg">
+                                <i class="fas fa-rocket me-2"></i>
+                                Start Unlimited Domain Harvest
+                            </button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+            
+            <!-- Quick Stats Sidebar -->
+            <div class="col-lg-4">
+                <div class="card feature-card">
+                    <div class="card-header bg-primary text-white">
+                        <h5 class="mb-0">
+                            <i class="fas fa-chart-bar me-2"></i>Live Statistics
+                        </h5>
+                    </div>
+                    <div class="card-body">
+                        <div class="row text-center">
+                            <div class="col-12 mb-3">
+                                <h4 class="text-primary">{{ "{:,}".format(stats.total_records) }}</h4>
+                                <small class="text-muted">Total Records</small>
+                            </div>
+                            <div class="col-6">
+                                <h5 class="text-success">{{ "{:,}".format(stats.by_type.mx) }}</h5>
+                                <small>MX Records</small>
+                            </div>
+                            <div class="col-6">
+                                <h5 class="text-info">{{ "{:,}".format(stats.by_type.ns) }}</h5>
+                                <small>NS Records</small>
+                            </div>
+                        </div>
+                        
+                        {% if stats.by_provider %}
+                        <hr>
+                        <h6>By API Provider:</h6>
+                        {% for provider, count in stats.by_provider.items() %}
+                        <div class="d-flex justify-content-between">
+                            <span class="badge api-badge bg-{{ 'success' if provider == 'viewdns' else 'secondary' }}">
+                                {{ provider.upper() }}
+                            </span>
+                            <strong>{{ "{:,}".format(count) }}</strong>
+                        </div>
+                        {% endfor %}
+                        {% endif %}
+                    </div>
+                </div>
+                
+                <!-- Export Options -->
+                <div class="card feature-card mt-3">
+                    <div class="card-header bg-info text-white">
+                        <h5 class="mb-0">
+                            <i class="fas fa-download me-2"></i>Export Data
+                        </h5>
+                    </div>
+                    <div class="card-body">
+                        <div class="d-grid gap-2">
+                            <div class="btn-group" role="group">
+                                <a href="/export?format=excel" class="btn btn-outline-success btn-sm">
+                                    <i class="fas fa-file-excel me-1"></i>Excel (.xlsx)
+                                </a>
+                                <a href="/export?format=csv" class="btn btn-outline-primary btn-sm">
+                                    <i class="fas fa-file-csv me-1"></i>CSV
+                                </a>
+                            </div>
+                            
+                            <div class="btn-group" role="group">
+                                <a href="/export?type=mx&format=excel" class="btn btn-outline-success btn-sm">
+                                    <i class="fas fa-envelope me-1"></i>MX Excel
+                                </a>
+                                <a href="/export?type=mx&format=csv" class="btn btn-outline-primary btn-sm">
+                                    <i class="fas fa-envelope me-1"></i>MX CSV
+                                </a>
+                            </div>
+                            
+                            <div class="btn-group" role="group">
+                                <a href="/export?type=ns&format=excel" class="btn btn-outline-info btn-sm">
+                                    <i class="fas fa-globe me-1"></i>NS Excel
+                                </a>
+                                <a href="/export?type=ns&format=csv" class="btn btn-outline-primary btn-sm">
+                                    <i class="fas fa-globe me-1"></i>NS CSV
+                                </a>
+                            </div>
+                            
+                            <small class="text-muted mt-2">
+                                <i class="fas fa-info-circle me-1"></i>
+                                Large datasets (>100K records) are automatically chunked into ZIP files
+                            </small>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Top Servers Section -->
+        {% if stats.top_mx_servers or stats.top_ns_servers %}
+        <div class="row mt-5">
+            {% if stats.top_mx_servers %}
+            <div class="col-lg-6">
+                <div class="card feature-card">
+                    <div class="card-header bg-success text-white">
+                        <h5 class="mb-0">
+                            <i class="fas fa-envelope me-2"></i>Top MX Servers
+                        </h5>
+                    </div>
+                    <div class="card-body">
+                        {% for server, count in stats.top_mx_servers[:5] %}
+                        <div class="d-flex justify-content-between align-items-center mb-2">
+                            <div>
+                                <strong>{{ server }}</strong>
+                                <div class="btn-group ms-2" role="group">
+                                    <a href="/export?type=mx&server={{ server }}&format=excel" class="btn btn-sm btn-outline-success" title="Export as Excel">
+                                        <i class="fas fa-file-excel"></i>
+                                    </a>
+                                    <a href="/export?type=mx&server={{ server }}&format=csv" class="btn btn-sm btn-outline-primary" title="Export as CSV">
+                                        <i class="fas fa-file-csv"></i>
+                                    </a>
+                                </div>
+                            </div>
+                            <span class="badge bg-success">{{ "{:,}".format(count) }}</span>
+                        </div>
+                        {% endfor %}
+                    </div>
+                </div>
+            </div>
+            {% endif %}
+            
+            {% if stats.top_ns_servers %}
+            <div class="col-lg-6">
+                <div class="card feature-card">
+                    <div class="card-header bg-info text-white">
+                        <h5 class="mb-0">
+                            <i class="fas fa-globe me-2"></i>Top NS Servers
+                        </h5>
+                    </div>
+                    <div class="card-body">
+                        {% for server, count in stats.top_ns_servers[:5] %}
+                        <div class="d-flex justify-content-between align-items-center mb-2">
+                            <div>
+                                <strong>{{ server }}</strong>
+                                <div class="btn-group ms-2" role="group">
+                                    <a href="/export?type=ns&server={{ server }}&format=excel" class="btn btn-sm btn-outline-success" title="Export as Excel">
+                                        <i class="fas fa-file-excel"></i>
+                                    </a>
+                                    <a href="/export?type=ns&server={{ server }}&format=csv" class="btn btn-sm btn-outline-primary" title="Export as CSV">
+                                        <i class="fas fa-file-csv"></i>
+                                    </a>
+                                </div>
+                            </div>
+                            <span class="badge bg-info">{{ "{:,}".format(count) }}</span>
+                        </div>
+                        {% endfor %}
+                    </div>
+                </div>
+            </div>
+            {% endif %}
+        </div>
+        {% endif %}
+
+        <!-- Recent Harvests -->
+        {% if stats.recent_harvests %}
+        <div class="row mt-5">
+            <div class="col-12">
+                <div class="card feature-card">
+                    <div class="card-header bg-dark text-white">
+                        <h5 class="mb-0">
+                            <i class="fas fa-history me-2"></i>Recent Harvest Sessions
+                        </h5>
+                    </div>
+                    <div class="card-body">
+                        <div class="table-responsive">
+                            <table class="table table-striped">
+                                <thead>
+                                    <tr>
+                                        <th>Server</th>
+                                        <th>Type</th>
+                                        <th>Provider</th>
+                                        <th>Domains</th>
+                                        <th>Status</th>
+                                        <th>Started</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {% for harvest in stats.recent_harvests %}
+                                    <tr>
+                                        <td><code>{{ harvest[0] }}</code></td>
+                                        <td>
+                                            <span class="badge bg-{{ 'success' if harvest[1] == 'mx' else 'info' }}">
+                                                {{ harvest[1].upper() }}
+                                            </span>
+                                        </td>
+                                        <td>
+                                            <span class="badge bg-{{ 'success' if harvest[2] == 'viewdns' else 'secondary' }}">
+                                                {{ harvest[2].upper() }}
+                                            </span>
+                                        </td>
+                                        <td><strong>{{ "{:,}".format(harvest[3]) if harvest[3] else 'N/A' }}</strong></td>
+                                        <td>
+                                            <span class="badge bg-{{ 'success' if harvest[4] == 'complete' else 'warning' if harvest[4] == 'running' else 'danger' }}">
+                                                {{ harvest[4].title() }}
+                                            </span>
+                                        </td>
+                                        <td><small>{{ harvest[5] }}</small></td>
+                                    </tr>
+                                    {% endfor %}
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        {% endif %}
+
+        <!-- Admin Section -->
+        <div class="row mt-5">
+            <div class="col-12">
+                <div class="card border-danger">
+                    <div class="card-header bg-danger text-white">
+                        <h5 class="mb-0">
+                            <i class="fas fa-trash-alt me-2"></i>Database Management
+                        </h5>
+                    </div>
+                    <div class="card-body">
+                        <p class="text-muted">
+                            <i class="fas fa-exclamation-triangle me-1"></i>
+                            Use with caution: This will permanently delete all harvested domain data.
+                        </p>
+                        <form method="POST" action="/clear_database" onsubmit="return confirm('Are you sure you want to clear ALL data? This cannot be undone!')">
+                            <button type="submit" class="btn btn-danger">
+                                <i class="fas fa-trash me-2"></i>Clear All Data
+                            </button>
+                        </form>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Footer -->
+    <footer class="bg-dark text-white py-4 mt-5">
+        <div class="container text-center">
+            <p class="mb-0">
+                <i class="fas fa-globe me-2"></i>
+                Advanced Domain Intelligence Platform - Powered by ViewDNS API
+            </p>
+            <p class="mb-0">
+                <small class="text-muted">
+                    🚀 Unlimited domain discovery • 🔍 Real-time harvesting • 📊 Advanced analytics
+                </small>
+            </p>
+        </div>
+    </footer>
+
+    <!-- Bootstrap JS -->
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
+    
+    <!-- Live Stats Update -->
+    <script>
+        // Auto-refresh stats every 30 seconds
+        setInterval(function() {
+            fetch('/api/stats')
+                .then(response => response.json())
+                .then(data => {
+                    // Update stats display if needed
+                    console.log('Stats updated:', data);
+                })
+                .catch(error => console.log('Stats update failed:', error));
+        }, 30000);
+    </script>
+</body>
+</html>

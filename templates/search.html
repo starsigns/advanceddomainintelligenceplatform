@@ -1,0 +1,101 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="row justify-content-center">
+    <div class="col-lg-8">
+        <div class="card">
+            <div class="card-header bg-primary text-white">
+                <h4 class="mb-0">
+                    <i class="fas fa-search me-2"></i>Domain Intelligence Search
+                </h4>
+            </div>
+            <div class="card-body">
+                <form method="POST" action="{{ url_for('harvest') }}">
+                    <div class="row">
+                        <div class="col-md-6 mb-3">
+                            <label for="record_type" class="form-label">
+                                <i class="fas fa-list-alt me-1"></i>Record Type
+                            </label>
+                            <select class="form-select" name="record_type" id="record_type" required>
+                                <option value="">Select record type</option>
+                                <option value="mx">📧 MX (Mail Exchange)</option>
+                                <option value="ns">🌐 NS (Name Server)</option>
+                            </select>
+                        </div>
+                        
+                        <div class="col-md-6 mb-3">
+                            <label for="server" class="form-label">
+                                <i class="fas fa-server me-1"></i>Server Name
+                            </label>
+                            <input type="text" class="form-control" name="server" id="server" 
+                                   placeholder="e.g., mx01.ionos.de, mail.google.com" required>
+                        </div>
+                    </div>
+                    
+                    <div class="row">
+                        <div class="col-md-6 mb-3">
+                            <label for="api_provider" class="form-label">
+                                <i class="fas fa-cloud me-1"></i>API Provider
+                            </label>
+                            <select class="form-select" name="api_provider" id="api_provider">
+                                <option value="viewdns">🚀 ViewDNS (UNLIMITED)</option>
+                                <option value="securitytrails">🔒 SecurityTrails (Limited)</option>
+                            </select>
+                        </div>
+                        
+                        <div class="col-md-6 mb-3">
+                            <label for="max_pages" class="form-label">
+                                <i class="fas fa-stop-circle me-1"></i>Max Pages (Optional)
+                            </label>
+                            <input type="number" class="form-control" name="max_pages" id="max_pages" 
+                                   placeholder="Leave empty for unlimited">
+                        </div>
+                    </div>
+                    
+                    <div class="d-grid">
+                        <button type="submit" class="btn btn-success btn-lg">
+                            <i class="fas fa-rocket me-2"></i>Start Domain Harvest
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
+        
+        <!-- Instructions -->
+        <div class="card mt-4">
+            <div class="card-header bg-info text-white">
+                <h5 class="mb-0">
+                    <i class="fas fa-info-circle me-2"></i>How It Works
+                </h5>
+            </div>
+            <div class="card-body">
+                <div class="row">
+                    <div class="col-md-6">
+                        <h6><i class="fas fa-envelope me-2 text-success"></i>MX Records</h6>
+                        <p>Find all domains that use a specific mail server (e.g., mail.google.com, mx01.ionos.de)</p>
+                        
+                        <h6><i class="fas fa-globe me-2 text-info"></i>NS Records</h6>
+                        <p>Find all domains that use a specific name server (e.g., ns1.google.com)</p>
+                    </div>
+                    <div class="col-md-6">
+                        <h6><i class="fas fa-rocket me-2 text-success"></i>ViewDNS API</h6>
+                        <p>Unlimited results with auto-scroll pagination - can harvest millions of domains!</p>
+                        
+                        <h6><i class="fas fa-download me-2 text-primary"></i>Export Options</h6>
+                        <p>Results are cached locally and can be exported to CSV for analysis</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+    
+    <div style="background-color: #f8f9fa; padding: 15px; margin-top: 20px; border-left: 4px solid #007bff;">
+        <h4>API Options:</h4>
+        <p><strong>Standard Mode:</strong> Uses the regular SecurityTrails API to get up to 10,000 results (100 pages).</p>
+        <p><strong>Bypass Methods:</strong> Tries different filtering approaches to potentially get more than 10,000 results with your current plan.</p>
+        <p><strong>DSL Scroll Mode:</strong> Attempts unlimited results using DSL + scroll API (requires premium plan).</p>
+    </div>
+</div>
+{% endblock %}
