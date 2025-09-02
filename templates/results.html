@@ -88,7 +88,12 @@
                     <tbody>
                         {% for record in records %}
                         <tr>
-                            <td><strong>{{ record[0] }}</strong></td>
+                            <td>
+                                <a href="{{ record[0] }}" target="_blank" class="text-decoration-none">
+                                    <strong>{{ record[0] }}</strong>
+                                    <i class="fas fa-external-link-alt ms-1 text-muted" style="font-size: 0.8em;"></i>
+                                </a>
+                            </td>
                             <td>
                                 {% if record[1] %}
                                     <span class="badge bg-success">{{ record[1] }}</span>

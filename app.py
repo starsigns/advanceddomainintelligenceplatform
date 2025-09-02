@@ -276,6 +276,27 @@ class ViewDNSAPI:
         logger.info(f"Harvest complete for {server}: {total_domains} domains across {page-1} pages")
         return total_domains
 
+def format_domain_url(domain):
+    """
+    Format domain as clickable URL by adding http:// prefix if not present.
+    Ensures consistent URL formatting across the application.
+    
+    Args:
+        domain (str): Domain name to format
+        
+    Returns:
+        str: Formatted URL with http:// prefix
+    """
+    if not domain:
+        return domain
+    
+    # Check if already has protocol
+    if domain.startswith(('http://', 'https://')):
+        return domain
+    
+    # Add http:// prefix to make clickable
+    return f"http://{domain}"
+
 def insert_domains_batch(domains, record_type, server, session_id):
     """Insert a batch of domains into the database."""
     conn = sqlite3.connect(DATABASE)
@@ -306,11 +327,14 @@ def insert_domains_batch(domains, record_type, server, session_id):
         mx_value = server if record_type == 'mx' else None
         ns_value = server if record_type == 'ns' else None
         
+        # Format domain as clickable URL
+        formatted_domain = format_domain_url(domain_name)
+        
         try:
             cursor.execute('''
                 INSERT OR IGNORE INTO domains (domain, mx, ns, provider, session_id)
                 VALUES (?, ?, ?, ?, ?)
-            ''', (domain_name, mx_value, ns_value, 'viewdns', session_id))
+            ''', (formatted_domain, mx_value, ns_value, 'viewdns', session_id))
             
             if cursor.rowcount > 0:
                 inserted_count += 1
