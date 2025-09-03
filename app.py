@@ -1,5 +1,6 @@
 import os
-import sqlite3
+import duckdb
+import pandas as pd
 import time
 import threading
 from datetime import datetime
@@ -27,7 +28,7 @@ VIEWDNS_API_KEY = os.getenv('VIEWDNS_API_KEY')
 SECURITYTRAILS_API_KEY = os.getenv('SECURITYTRAILS_API_KEY')
 
 # Database configuration
-DATABASE = 'domains.db'
+DATABASE = 'domains.duckdb'
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -38,70 +39,76 @@ harvest_progress = {}
 harvest_threads = {}
 
 def init_db():
-    """Initialize the SQLite database with enhanced schema for provider tracking."""
-    conn = sqlite3.connect(DATABASE)
-    cursor = conn.cursor()
+    """Initialize the DuckDB database with enhanced schema for provider tracking."""
+    conn = duckdb.connect(DATABASE)
     
-    # Check if this is an existing database
-    cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='domains'")
-    table_exists = cursor.fetchone() is not None
+    # Enable optimizations (using correct DuckDB syntax)
+    conn.execute("SET enable_object_cache=true")
     
-    if table_exists:
-        # Check if new columns exist, add them if not
-        cursor.execute("PRAGMA table_info(domains)")
-        columns = [column[1] for column in cursor.fetchall()]
-        
-        if 'provider' not in columns:
-            cursor.execute('ALTER TABLE domains ADD COLUMN provider TEXT DEFAULT "viewdns"')
-        
-        if 'session_id' not in columns:
-            cursor.execute('ALTER TABLE domains ADD COLUMN session_id TEXT')
-    else:
-        # Create domains table with provider tracking
-        cursor.execute('''
-            CREATE TABLE IF NOT EXISTS domains (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                domain TEXT NOT NULL,
-                mx TEXT,
-                ns TEXT,
-                provider TEXT DEFAULT 'viewdns',
-                session_id TEXT,
-                fetched_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                UNIQUE(domain, mx, ns, provider)
+    # Check if domains table exists
+    try:
+        result = conn.execute("SELECT COUNT(*) FROM domains").fetchone()
+        table_exists = True
+    except:
+        table_exists = False
+    
+    if not table_exists:
+        # Create domains table with optimized types
+        conn.execute('''
+            CREATE TABLE domains (
+                id BIGINT PRIMARY KEY,
+                domain VARCHAR NOT NULL,
+                mx VARCHAR,
+                ns VARCHAR,
+                provider VARCHAR DEFAULT 'viewdns',
+                session_id VARCHAR,
+                fetched_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         ''')
+        
+        # Create sequence for auto-increment
+        conn.execute("CREATE SEQUENCE domains_id_seq START 1")
+        
+        # Create optimized indexes
+        conn.execute("CREATE INDEX idx_domain ON domains(domain)")
+        conn.execute("CREATE INDEX idx_mx ON domains(mx)")
+        conn.execute("CREATE INDEX idx_ns ON domains(ns)")
+        conn.execute("CREATE INDEX idx_provider ON domains(provider)")
+        conn.execute("CREATE INDEX idx_fetched_at ON domains(fetched_at)")
     
-    # Create harvest sessions table
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS harvest_sessions (
-            id TEXT PRIMARY KEY,
-            server TEXT NOT NULL,
-            record_type TEXT NOT NULL,
-            provider TEXT NOT NULL,
-            status TEXT DEFAULT 'running',
-            total_domains INTEGER DEFAULT 0,
-            pages_fetched INTEGER DEFAULT 0,
-            started_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            completed_at TIMESTAMP NULL
-        )
-    ''')
+    # Check if harvest_sessions table exists
+    try:
+        result = conn.execute("SELECT COUNT(*) FROM harvest_sessions").fetchone()
+        sessions_table_exists = True
+    except:
+        sessions_table_exists = False
     
-    # Create indexes for faster queries (safely)
-    cursor.execute('CREATE INDEX IF NOT EXISTS idx_domain ON domains(domain)')
-    cursor.execute('CREATE INDEX IF NOT EXISTS idx_mx ON domains(mx)')
-    cursor.execute('CREATE INDEX IF NOT EXISTS idx_ns ON domains(ns)')
+    if not sessions_table_exists:
+        # Create harvest sessions table
+        conn.execute('''
+            CREATE TABLE harvest_sessions (
+                id VARCHAR PRIMARY KEY,
+                server VARCHAR NOT NULL,
+                record_type VARCHAR NOT NULL,
+                provider VARCHAR NOT NULL,
+                status VARCHAR DEFAULT 'running',
+                total_domains BIGINT DEFAULT 0,
+                pages_fetched BIGINT DEFAULT 0,
+                started_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                completed_at TIMESTAMP
+            )
+        ''')
+        
+        # Create indexes for harvest sessions
+        conn.execute("CREATE INDEX idx_harvest_server ON harvest_sessions(server)")
+        conn.execute("CREATE INDEX idx_harvest_status ON harvest_sessions(status)")
+        conn.execute("CREATE INDEX idx_harvest_started ON harvest_sessions(started_at)")
     
-    # Only create provider and session indexes if columns exist
-    cursor.execute("PRAGMA table_info(domains)")
-    columns = [column[1] for column in cursor.fetchall()]
-    
-    if 'provider' in columns:
-        cursor.execute('CREATE INDEX IF NOT EXISTS idx_provider ON domains(provider)')
-    if 'session_id' in columns:
-        cursor.execute('CREATE INDEX IF NOT EXISTS idx_session ON domains(session_id)')
-    
-    conn.commit()
     conn.close()
+
+# Global variables for tracking harvesting progress
+harvest_progress = {}
+harvest_threads = {}
 
 class ViewDNSAPI:
     """ViewDNS API client with unlimited auto-scroll harvesting."""
@@ -298,9 +305,8 @@ def format_domain_url(domain):
     return f"http://{domain}"
 
 def insert_domains_batch(domains, record_type, server, session_id):
-    """Insert a batch of domains into the database."""
-    conn = sqlite3.connect(DATABASE)
-    cursor = conn.cursor()
+    """Insert a batch of domains into the database using DuckDB."""
+    conn = duckdb.connect(DATABASE)
     
     inserted_count = 0
     
@@ -309,6 +315,9 @@ def insert_domains_batch(domains, record_type, server, session_id):
         logger.error(f"Expected list of domains, got: {type(domains)} - {domains}")
         conn.close()
         return 0
+    
+    # Prepare batch data for insertion
+    batch_data = []
     
     for domain in domains:
         # ViewDNS returns domains as plain strings, not objects
@@ -330,44 +339,65 @@ def insert_domains_batch(domains, record_type, server, session_id):
         # Format domain as clickable URL
         formatted_domain = format_domain_url(domain_name)
         
+        # Add to batch data
+        batch_data.append((
+            formatted_domain, 
+            mx_value, 
+            ns_value, 
+            'viewdns', 
+            session_id
+        ))
+    
+    # Bulk insert using DuckDB - much faster than individual inserts
+    if batch_data:
         try:
-            cursor.execute('''
-                INSERT OR IGNORE INTO domains (domain, mx, ns, provider, session_id)
-                VALUES (?, ?, ?, ?, ?)
-            ''', (formatted_domain, mx_value, ns_value, 'viewdns', session_id))
+            # Create DataFrame for faster bulk insert
+            df = pd.DataFrame(batch_data, columns=['domain', 'mx', 'ns', 'provider', 'session_id'])
             
-            if cursor.rowcount > 0:
-                inserted_count += 1
-                
-        except sqlite3.Error as e:
-            logger.error(f"Database error inserting {domain_name}: {e}")
+            # Use DuckDB's INSERT from DataFrame (extremely fast)
+            conn.execute("""
+                INSERT OR IGNORE INTO domains (id, domain, mx, ns, provider, session_id)
+                SELECT nextval('domains_id_seq'), domain, mx, ns, provider, session_id
+                FROM df
+            """)
+            
+            inserted_count = len(batch_data)
+            logger.info(f"Bulk inserted {inserted_count} domains")
+            
+        except Exception as e:
+            logger.error(f"Bulk insert error: {e}")
+            # Fallback to individual inserts
+            for data in batch_data:
+                try:
+                    conn.execute("""
+                        INSERT OR IGNORE INTO domains (id, domain, mx, ns, provider, session_id)
+                        VALUES (nextval('domains_id_seq'), ?, ?, ?, ?, ?)
+                    """, data)
+                    inserted_count += 1
+                except Exception as inner_e:
+                    logger.error(f"Individual insert error: {inner_e}")
     
-    conn.commit()
     conn.close()
-    
     return inserted_count
 
 def create_harvest_session(server, record_type, provider='viewdns'):
     """Create a new harvest session."""
     session_id = f"{provider}_{record_type}_{server}_{int(time.time())}"
     
-    conn = sqlite3.connect(DATABASE)
-    cursor = conn.cursor()
+    conn = duckdb.connect(DATABASE)
     
-    cursor.execute('''
+    conn.execute('''
         INSERT INTO harvest_sessions (id, server, record_type, provider)
         VALUES (?, ?, ?, ?)
     ''', (session_id, server, record_type, provider))
     
-    conn.commit()
     conn.close()
     
     return session_id
 
 def update_harvest_session(session_id, **kwargs):
     """Update harvest session with new information."""
-    conn = sqlite3.connect(DATABASE)
-    cursor = conn.cursor()
+    conn = duckdb.connect(DATABASE)
     
     updates = []
     values = []
@@ -384,75 +414,110 @@ def update_harvest_session(session_id, **kwargs):
         query = f"UPDATE harvest_sessions SET {', '.join(updates)} WHERE id = ?"
         values.append(session_id)
         
-        cursor.execute(query, values)
-        conn.commit()
+        conn.execute(query, values)
     
     conn.close()
 
 def get_database_stats():
-    """Get comprehensive database statistics."""
-    conn = sqlite3.connect(DATABASE)
-    cursor = conn.cursor()
+    """Get comprehensive database statistics with DuckDB optimizations."""
+    conn = duckdb.connect(DATABASE)
     
-    # Total records
-    cursor.execute("SELECT COUNT(*) FROM domains")
-    total_records = cursor.fetchone()[0]
-    
-    # Unique domains
-    cursor.execute("SELECT COUNT(DISTINCT domain) FROM domains")
-    unique_domains = cursor.fetchone()[0]
-    
-    # By record type
-    cursor.execute("SELECT COUNT(*) FROM domains WHERE mx IS NOT NULL")
-    mx_count = cursor.fetchone()[0]
-    
-    cursor.execute("SELECT COUNT(*) FROM domains WHERE ns IS NOT NULL")
-    ns_count = cursor.fetchone()[0]
-    
-    # By provider
-    cursor.execute("SELECT provider, COUNT(*) FROM domains GROUP BY provider")
-    by_provider = dict(cursor.fetchall())
-    
-    # Top MX servers
-    cursor.execute("""
-        SELECT mx, COUNT(*) as count FROM domains 
-        WHERE mx IS NOT NULL 
-        GROUP BY mx 
-        ORDER BY count DESC 
-        LIMIT 10
-    """)
-    top_mx_servers = cursor.fetchall()
-    
-    # Top NS servers
-    cursor.execute("""
-        SELECT ns, COUNT(*) as count FROM domains 
-        WHERE ns IS NOT NULL 
-        GROUP BY ns 
-        ORDER BY count DESC 
-        LIMIT 10
-    """)
-    top_ns_servers = cursor.fetchall()
-    
-    # Recent harvests
-    cursor.execute("""
-        SELECT server, record_type, provider, total_domains, status, started_at
-        FROM harvest_sessions 
-        ORDER BY started_at DESC 
-        LIMIT 10
-    """)
-    recent_harvests = cursor.fetchall()
-    
-    conn.close()
-    
-    return {
-        'total_records': total_records,
-        'unique_domains': unique_domains,
-        'by_type': {'mx': mx_count, 'ns': ns_count},
-        'by_provider': by_provider,
-        'top_mx_servers': top_mx_servers,
-        'top_ns_servers': top_ns_servers,
-        'recent_harvests': recent_harvests
-    }
+    try:
+        # Use single query with multiple aggregations for better performance
+        stats_query = """
+        WITH domain_stats AS (
+            SELECT 
+                COUNT(*) as total_records,
+                COUNT(DISTINCT domain) as unique_domains,
+                COUNT(CASE WHEN mx IS NOT NULL THEN 1 END) as mx_count,
+                COUNT(CASE WHEN ns IS NOT NULL THEN 1 END) as ns_count
+            FROM domains
+        ),
+        provider_stats AS (
+            SELECT provider, COUNT(*) as count 
+            FROM domains 
+            GROUP BY provider
+        ),
+        top_mx AS (
+            SELECT mx, COUNT(*) as count 
+            FROM domains 
+            WHERE mx IS NOT NULL 
+            GROUP BY mx 
+            ORDER BY count DESC 
+            LIMIT 10
+        ),
+        top_ns AS (
+            SELECT ns, COUNT(*) as count 
+            FROM domains 
+            WHERE ns IS NOT NULL 
+            GROUP BY ns 
+            ORDER BY count DESC 
+            LIMIT 10
+        ),
+        recent_harvests AS (
+            SELECT server, record_type, provider, total_domains, status, started_at
+            FROM harvest_sessions 
+            ORDER BY started_at DESC 
+            LIMIT 10
+        )
+        SELECT * FROM domain_stats
+        """
+        
+        # Get main stats
+        result = conn.execute(stats_query).fetchone()
+        total_records, unique_domains, mx_count, ns_count = result
+        
+        # Get provider breakdown
+        by_provider = dict(conn.execute("SELECT provider, COUNT(*) FROM domains GROUP BY provider").fetchall())
+        
+        # Get top servers
+        top_mx_servers = conn.execute("""
+            SELECT mx, COUNT(*) as count FROM domains 
+            WHERE mx IS NOT NULL 
+            GROUP BY mx 
+            ORDER BY count DESC 
+            LIMIT 10
+        """).fetchall()
+        
+        top_ns_servers = conn.execute("""
+            SELECT ns, COUNT(*) as count FROM domains 
+            WHERE ns IS NOT NULL 
+            GROUP BY ns 
+            ORDER BY count DESC 
+            LIMIT 10
+        """).fetchall()
+        
+        # Get recent harvests
+        recent_harvests = conn.execute("""
+            SELECT server, record_type, provider, total_domains, status, started_at
+            FROM harvest_sessions 
+            ORDER BY started_at DESC 
+            LIMIT 10
+        """).fetchall()
+        
+        return {
+            'total_records': total_records,
+            'unique_domains': unique_domains,
+            'by_type': {'mx': mx_count, 'ns': ns_count},
+            'by_provider': by_provider,
+            'top_mx_servers': top_mx_servers,
+            'top_ns_servers': top_ns_servers,
+            'recent_harvests': recent_harvests
+        }
+        
+    except Exception as e:
+        logger.error(f"Error getting database stats: {e}")
+        return {
+            'total_records': 0,
+            'unique_domains': 0,
+            'by_type': {'mx': 0, 'ns': 0},
+            'by_provider': {},
+            'top_mx_servers': [],
+            'top_ns_servers': [],
+            'recent_harvests': []
+        }
+    finally:
+        conn.close()
 
 @app.route('/')
 def home():
@@ -778,8 +843,7 @@ def export():
     server = request.args.get('server')
     format_type = request.args.get('format', 'excel')  # Default to Excel
     
-    conn = sqlite3.connect(DATABASE)
-    cursor = conn.cursor()
+    conn = duckdb.connect(DATABASE)
     
     # Build query based on filters
     query = "SELECT domain, mx, ns, provider, fetched_at FROM domains WHERE 1=1"
@@ -798,8 +862,9 @@ def export():
     
     query += " ORDER BY fetched_at DESC"
     
-    cursor.execute(query, params)
-    results = cursor.fetchall()
+    # Use pandas for faster data processing
+    df = conn.execute(query, params).df()
+    results = df.to_records(index=False).tolist()
     conn.close()
     
     if not results:
@@ -831,21 +896,6 @@ def export():
         download_name=filename,
         mimetype=mimetype
     )
-
-@app.route('/clear_database', methods=['POST'])
-def clear_database():
-    """Clear all data from the database."""
-    conn = sqlite3.connect(DATABASE)
-    cursor = conn.cursor()
-    
-    cursor.execute("DELETE FROM domains")
-    cursor.execute("DELETE FROM harvest_sessions")
-    
-    conn.commit()
-    conn.close()
-    
-    flash('Database cleared successfully!', 'info')
-    return redirect(url_for('home'))
 
 @app.route('/api/stats')
 def api_stats():
@@ -908,6 +958,51 @@ def progress(session_id):
     """Get harvest progress for a session."""
     progress_data = harvest_progress.get(session_id, {})
     return jsonify(progress_data)
+
+@app.route('/clear-database', methods=['POST'])
+def clear_database():
+    """Safely clear all data from the database while preserving structure."""
+    try:
+        conn = duckdb.connect(DATABASE)
+        
+        # Get counts before clearing
+        domains_count = conn.execute('SELECT COUNT(*) FROM domains').fetchone()[0]
+        sessions_count = conn.execute('SELECT COUNT(*) FROM harvest_sessions').fetchone()[0]
+        
+        # Clear all data from tables (but keep the structure)
+        conn.execute('DELETE FROM domains')
+        conn.execute('DELETE FROM harvest_sessions')
+        
+        # Reset sequence for DuckDB (DuckDB uses different syntax)
+        try:
+            conn.execute('DROP SEQUENCE IF EXISTS domains_id_seq')
+            conn.execute('CREATE SEQUENCE domains_id_seq START 1')
+        except Exception as seq_error:
+            # If sequence operations fail, just continue - the main clearing still worked
+            logger.warning(f"Could not reset sequence: {seq_error}")
+        
+        conn.close()
+        
+        # Clear any active harvest progress tracking
+        global harvest_progress, harvest_threads
+        harvest_progress.clear()
+        harvest_threads.clear()
+        
+        logger.info(f"Database cleared successfully. Removed {domains_count} domains and {sessions_count} sessions")
+        
+        return jsonify({
+            'success': True,
+            'message': f'Database cleared successfully! Removed {domains_count} domains and {sessions_count} harvest sessions.',
+            'domains_removed': domains_count,
+            'sessions_removed': sessions_count
+        })
+        
+    except Exception as e:
+        logger.error(f"Error clearing database: {e}")
+        return jsonify({
+            'success': False,
+            'error': f'Failed to clear database: {str(e)}'
+        }), 500
 
 if __name__ == '__main__':
     init_db()

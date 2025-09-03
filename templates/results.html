@@ -64,6 +64,48 @@
                 </div>
             </div>
         </div>
+        <div class="col-md-3">
+            <div class="card bg-danger text-white">
+                <div class="card-body text-center">
+                    <h4><i class="fas fa-trash me-2"></i>Clear DB</h4>
+                    <button id="clearDbBtn" class="btn btn-sm btn-light text-danger" title="Clear all database content">
+                        <i class="fas fa-eraser me-1"></i>Clear All
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Clear Database Confirmation Modal -->
+    <div class="modal fade" id="clearDbModal" tabindex="-1" aria-labelledby="clearDbModalLabel" aria-hidden="true">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header bg-danger text-white">
+                    <h5 class="modal-title" id="clearDbModalLabel">
+                        <i class="fas fa-exclamation-triangle me-2"></i>Clear Database
+                    </h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body">
+                    <p><strong>⚠️ WARNING:</strong> This action will permanently delete ALL domains and harvest sessions from the database.</p>
+                    <p>Current database contains:</p>
+                    <ul>
+                        <li><strong>{{ total_records }}</strong> domain records</li>
+                        <li>All harvest session history</li>
+                    </ul>
+                    <p class="text-danger"><strong>This action cannot be undone!</strong></p>
+                    <p>Are you sure you want to proceed?</p>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">
+                        <i class="fas fa-times me-1"></i>Cancel
+                    </button>
+                    <button type="button" id="confirmClearDb" class="btn btn-danger">
+                        <i class="fas fa-trash me-1"></i>Yes, Clear Database
+                    </button>
+                </div>
+            </div>
+        </div>
     </div>
     
     <!-- Results Table -->
@@ -189,4 +231,81 @@
         </div>
     </div>
 {% endif %}
+
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    // Clear Database functionality
+    const clearDbBtn = document.getElementById('clearDbBtn');
+    const clearDbModal = new bootstrap.Modal(document.getElementById('clearDbModal'));
+    const confirmClearDb = document.getElementById('confirmClearDb');
+    
+    if (clearDbBtn) {
+        clearDbBtn.addEventListener('click', function() {
+            clearDbModal.show();
+        });
+    }
+    
+    if (confirmClearDb) {
+        confirmClearDb.addEventListener('click', function() {
+            // Show loading state
+            confirmClearDb.innerHTML = '<i class="fas fa-spinner fa-spin me-1"></i>Clearing...';
+            confirmClearDb.disabled = true;
+            
+            // Make request to clear database
+            fetch('/clear-database', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                }
+            })
+            .then(response => response.json())
+            .then(data => {
+                clearDbModal.hide();
+                
+                if (data.success) {
+                    // Show success message
+                    showAlert('success', `✅ ${data.message}`);
+                    
+                    // Reload page after 2 seconds to show empty state
+                    setTimeout(() => {
+                        window.location.reload();
+                    }, 2000);
+                } else {
+                    showAlert('danger', `❌ Error: ${data.error}`);
+                }
+            })
+            .catch(error => {
+                clearDbModal.hide();
+                showAlert('danger', `❌ Network error: ${error.message}`);
+                console.error('Clear database error:', error);
+            })
+            .finally(() => {
+                // Reset button state
+                confirmClearDb.innerHTML = '<i class="fas fa-trash me-1"></i>Yes, Clear Database';
+                confirmClearDb.disabled = false;
+            });
+        });
+    }
+    
+    // Helper function to show alerts
+    function showAlert(type, message) {
+        const alertDiv = document.createElement('div');
+        alertDiv.className = `alert alert-${type} alert-dismissible fade show position-fixed`;
+        alertDiv.style.cssText = 'top: 20px; right: 20px; z-index: 9999; max-width: 400px;';
+        alertDiv.innerHTML = `
+            ${message}
+            <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+        `;
+        document.body.appendChild(alertDiv);
+        
+        // Auto-remove after 5 seconds
+        setTimeout(() => {
+            if (alertDiv.parentNode) {
+                alertDiv.remove();
+            }
+        }, 5000);
+    }
+});
+</script>
+
 {% endblock %}
